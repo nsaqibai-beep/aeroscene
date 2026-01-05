@@ -9,8 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/huggingface": "^1.0.2",
     "@supabase/supabase-js": "^2.89.0",
     "@vercel/blob": "^2.0.0",
+    "ai": "^6.0.7",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",

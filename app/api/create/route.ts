@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { createVideoJob } from "@/lib/aeroscene";
+import { put } from "@vercel/blob";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function POST(request: Request) {
   try {
@@ -7,15 +13,28 @@ export async function POST(request: Request) {
     const file = formData.get("file") as File;
     const preset = formData.get("preset") as string;
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
-    }
+    const blob = await put(`uploads/${Date.now()}-${file.name}`, file, {
+      access: "public",
+    });
 
-    const job = await createVideoJob(file, preset);
+    const { data: job, error } = await supabase
+      .from("jobs")
+      .insert({
+        image_url: blob.url,
+        status: "processing",
+        motion_preset: preset,
+      })
+      .select()
+      .single();
 
-    return NextResponse.json({ success: true, jobId: job.id });
+    if (error) throw new Error(error.message);
+
+    return NextResponse.json({
+      imageUrl: blob.url,
+      jobId: job.id,
+      apiKey: process.env.SEGMIND_API_KEY,
+    });
   } catch (error: unknown) {
-    console.error("Upload error:", error);
     const errorMessage =
       error instanceof Error ? error.message : "Internal Server Error";
     return NextResponse.json({ error: errorMessage }, { status: 500 });

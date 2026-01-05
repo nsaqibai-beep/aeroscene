@@ -11,52 +11,57 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [preset, setPreset] = useState("orbit");
 
-  // We need to fetch the token securely (or just use a proxy route, but for demo we can try direct if CORS allows,
-  // or use a specialized route that streams).
-  // BETTER APPROACH FOR VERCEL FREE:
-  // 1. Upload image to Vercel Blob (Server)
-  // 2. Return the Blob URL to Client
-  // 3. Client calls Hugging Face directly (Bypassing Vercel 10s timeout)
-  // 4. Client saves result to DB (Server)
-
   const handleUpload = async () => {
     if (!file) return;
     setStatus("uploading");
 
     try {
-      // Step 1: Upload Image to Vercel Blob via our API
+      // 1. Upload Image & Get API Key
       const formData = new FormData();
       formData.append("file", file);
       formData.append("preset", preset);
 
-      // We need a new simple route just for uploading
-      const uploadRes = await fetch("/api/upload-only", {
+      const uploadRes = await fetch("/api/create", {
         method: "POST",
         body: formData,
       });
       if (!uploadRes.ok) throw new Error("Upload failed");
 
-      const { imageUrl, jobId, hfToken } = await uploadRes.json();
+      const { imageUrl, jobId, apiKey } = await uploadRes.json();
 
       setStatus("processing");
 
-      // Step 2: Client calls Hugging Face (No timeout limit here!)
-      const hfResponse = await fetch(
-        "https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt",
+      // 2. Call Segmind Directly (No Vercel Timeout)
+      // Note: If you get CORS error here, you must use a proxy or server-side Replicate.
+      // Segmind usually supports CORS for direct calls if origin is allowed in settings,
+      // or we just try it.
+
+      // Convert Image URL to Base64? Segmind accepts URL.
+
+      const segmindRes = await fetch(
+        "https://api.segmind.com/v1/stable-video-diffusion",
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${hfToken}`, // We pass this from server temporarily
+            "x-api-key": apiKey,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ inputs: imageUrl }),
+          body: JSON.stringify({
+            image: imageUrl,
+            motion_bucket_id: 127,
+            cond_aug: 0.02,
+          }),
         }
       );
 
-      if (!hfResponse.ok) throw new Error("HF API Failed");
-      const videoBlob = await hfResponse.blob();
+      if (!segmindRes.ok) {
+        console.error(await segmindRes.text());
+        throw new Error("Segmind API Failed");
+      }
 
-      // Step 3: Upload the result back to our server
+      const videoBlob = await segmindRes.blob();
+
+      // 3. Save Result
       const videoFile = new File([videoBlob], "video.mp4", {
         type: "video/mp4",
       });
@@ -83,7 +88,9 @@ export default function Home() {
       <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent">
         AeroScene
       </h1>
-      <p className="text-gray-400 mb-8">AI Drone Video Generator</p>
+      <p className="text-gray-400 mb-8">
+        AI Drone Video Generator (Segmind Free Tier)
+      </p>
 
       {status === "idle" && (
         <div className="w-full max-w-md space-y-6">
@@ -101,19 +108,18 @@ export default function Home() {
           </div>
 
           <div className="flex gap-2">
-            {["orbit", "zoom_in", "pan"].map((p) => (
-              <button
-                key={p}
-                onClick={() => setPreset(p)}
-                className={`flex-1 p-3 rounded-lg border transition-all text-sm font-medium capitalize ${
-                  preset === p
-                    ? "border-blue-500 bg-blue-900/50"
-                    : "border-gray-800 bg-gray-900"
-                }`}
-              >
-                {p.replace("_", " ")}
-              </button>
-            ))}
+            <button
+              onClick={() => setPreset("orbit")}
+              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
+            >
+              Orbit
+            </button>
+            <button
+              onClick={() => setPreset("zoom")}
+              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
+            >
+              Zoom
+            </button>
           </div>
 
           <button
@@ -126,48 +132,42 @@ export default function Home() {
         </div>
       )}
 
-      {status === "processing" && (
+      {(status === "uploading" || status === "processing") && (
         <div className="text-center space-y-4">
           <div className="relative mx-auto w-16 h-16">
             <div className="absolute inset-0 border-4 border-gray-800 rounded-full"></div>
             <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
           </div>
-          <div>
-            <h3 className="text-xl font-bold">Generating...</h3>
-            <p className="text-gray-500">
-              Wait ~30-60s (Do not close this tab)
-            </p>
-          </div>
+          <p className="text-gray-400">Generating... (Wait 20s)</p>
+        </div>
+      )}
+
+      {status === "failed" && (
+        <div className="text-center text-red-500">
+          <p>Generation Failed. (Check Console for CORS/API Error)</p>
+          <button onClick={() => setStatus("idle")} className="underline mt-4">
+            Try Again
+          </button>
         </div>
       )}
 
       {status === "completed" && videoUrl && (
-        <div className="w-full max-w-lg space-y-4">
+        <div className="w-full max-w-lg">
           <video
             src={videoUrl}
             controls
             autoPlay
             loop
-            className="w-full rounded-xl border border-gray-800 bg-gray-900"
+            className="w-full rounded-xl border border-gray-800"
           />
           <button
-            onClick={() => setStatus("idle")}
-            className="w-full py-3 text-gray-400 border border-gray-800 rounded-lg"
+            onClick={() => {
+              setStatus("idle");
+              setFile(null);
+            }}
+            className="w-full py-3 mt-4 text-gray-400 border border-gray-800 rounded-lg"
           >
-            Create Another
-          </button>
-        </div>
-      )}
-      {status === "failed" && (
-        <div className="text-center space-y-4">
-          <p className="text-red-500 text-lg">
-            Failed. (Free AI servers are busy)
-          </p>
-          <button
-            onClick={() => setStatus("idle")}
-            className="text-white underline"
-          >
-            Try Again
+            New Shot
           </button>
         </div>
       )}

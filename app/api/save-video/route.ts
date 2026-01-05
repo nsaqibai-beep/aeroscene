@@ -22,9 +22,7 @@ export async function POST(request: Request) {
       .update({ status: "completed", video_url: blob.url })
       .eq("id", jobId);
 
-    if (error) {
-      throw new Error(error.message);
-    }
+    if (error) throw new Error(error.message);
 
     return NextResponse.json({ videoUrl: blob.url });
   } catch (error: unknown) {
