@@ -39,7 +39,7 @@ export default function Home() {
       // Convert Image URL to Base64? Segmind accepts URL.
 
       const segmindRes = await fetch(
-        "https://api.segmind.com/v1/stable-video-diffusion",
+        "https://api.segmind.com/v1/s5-video-diffusion-img2vid-xt-1-1",
         {
           method: "POST",
           headers: {
