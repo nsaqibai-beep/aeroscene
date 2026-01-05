@@ -1,28 +1,18 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { checkJobStatus } from "@/lib/aeroscene";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
-  if (!id) {
-    return NextResponse.json({ error: "Missing ID" }, { status: 400 });
+  if (!id) return NextResponse.json({ error: "Missing ID" }, { status: 400 });
+
+  try {
+    const job = await checkJobStatus(id);
+    return NextResponse.json(job);
+  } catch (error) {
+    // We log the error so it is 'used' to satisfy the linter
+    console.error("Status check failed:", error);
+    return NextResponse.json({ error: "Status check failed" }, { status: 500 });
   }
-
-  const { data, error } = await supabase
-    .from("jobs")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
-  }
-
-  return NextResponse.json(data);
 }

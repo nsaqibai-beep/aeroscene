@@ -15,90 +15,45 @@ export default function Home() {
     if (!file) return;
     setStatus("uploading");
 
-    try {
-      // 1. Upload Image & Get API Key
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("preset", preset);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("preset", preset);
 
-      const uploadRes = await fetch("/api/create", {
+    try {
+      // 1. Start Job
+      const res = await fetch("/api/create", {
         method: "POST",
         body: formData,
       });
-      if (!uploadRes.ok) throw new Error("Upload failed");
+      const data = await res.json();
 
-      const { imageUrl, jobId, apiKey } = await uploadRes.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
 
-      setStatus("processing");
+      if (data.jobId) {
+        setStatus("processing");
+        // 2. Poll Status (Every 3 seconds)
+        const interval = setInterval(async () => {
+          try {
+            const pollRes = await fetch(`/api/status?id=${data.jobId}`);
+            const job = await pollRes.json();
 
-      // 2. Call Segmind (Kling Model)
-      const segmindRes = await fetch("https://api.segmind.com/v1/kling-v1", {
-        method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: `Cinematic drone shot, ${preset} camera movement, high quality`,
-          input_image: imageUrl,
-          negative_prompt: "blurry, low quality, distortion",
-          cfg_scale: 0.5,
-          aspect_ratio: "16:9",
-        }),
-      });
-
-      if (!segmindRes.ok) {
-        const errText = await segmindRes.text();
-        console.error("Segmind API Error:", errText);
-        throw new Error(`Segmind Failed: ${errText}`);
+            if (job.status === "completed") {
+              setVideoUrl(job.video_url);
+              setStatus("completed");
+              clearInterval(interval);
+            } else if (job.status === "failed") {
+              setStatus("failed");
+              clearInterval(interval);
+            }
+          } catch (e) {
+            console.error("Polling error", e);
+          }
+        }, 3000);
       }
-
-      // Handle response (Binary Video OR JSON URL)
-      const contentType = segmindRes.headers.get("content-type");
-      let videoBlob: Blob;
-
-      if (contentType && contentType.includes("application/json")) {
-        // If JSON, it likely contains a URL or Base64
-        const json = await segmindRes.json();
-        console.log("Segmind JSON:", json);
-
-        if (json.video || json.output) {
-          const vidUrl = json.video || json.output;
-          const vidFetch = await fetch(vidUrl);
-          videoBlob = await vidFetch.blob();
-        } else if (json.status && json.status !== "completed") {
-          throw new Error(
-            "Job started but is async. Polling not implemented in this demo."
-          );
-        } else {
-          throw new Error("Unknown JSON response format");
-        }
-      } else {
-        // It's a raw video file
-        videoBlob = await segmindRes.blob();
-      }
-
-      // 3. Save Result
-      const videoFile = new File([videoBlob], "video.mp4", {
-        type: "video/mp4",
-      });
-      const resultFormData = new FormData();
-      resultFormData.append("file", videoFile);
-      resultFormData.append("jobId", jobId);
-
-      const saveRes = await fetch("/api/save-video", {
-        method: "POST",
-        body: resultFormData,
-      });
-      const saveData = await saveRes.json();
-
-      setVideoUrl(saveData.videoUrl);
-      setStatus("completed");
-    } catch (e: unknown) {
+    } catch (e) {
       console.error(e);
       setStatus("failed");
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      alert(`Error: ${msg}`);
+      alert("Error starting job. Check console.");
     }
   };
 
@@ -108,7 +63,7 @@ export default function Home() {
         AeroScene
       </h1>
       <p className="text-gray-400 mb-8">
-        AI Drone Video Generator (Segmind Kling)
+        AI Drone Video Generator (Powered by Replicate)
       </p>
 
       {status === "idle" && (
@@ -129,27 +84,15 @@ export default function Home() {
           <div className="flex gap-2">
             <button
               onClick={() => setPreset("orbit")}
-              className={`flex-1 p-3 rounded-lg border ${
-                preset === "orbit" ? "border-blue-500" : "border-gray-800"
-              } bg-gray-900`}
+              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
             >
               Orbit
             </button>
             <button
               onClick={() => setPreset("zoom")}
-              className={`flex-1 p-3 rounded-lg border ${
-                preset === "zoom" ? "border-blue-500" : "border-gray-800"
-              } bg-gray-900`}
+              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
             >
               Zoom
-            </button>
-            <button
-              onClick={() => setPreset("pan")}
-              className={`flex-1 p-3 rounded-lg border ${
-                preset === "pan" ? "border-blue-500" : "border-gray-800"
-              } bg-gray-900`}
-            >
-              Pan
             </button>
           </div>
 
@@ -169,7 +112,7 @@ export default function Home() {
             <div className="absolute inset-0 border-4 border-gray-800 rounded-full"></div>
             <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
           </div>
-          <p className="text-gray-400">Generating... (This may take 30-60s)</p>
+          <p className="text-gray-400">Generating... (30-60s)</p>
         </div>
       )}
 
@@ -192,7 +135,7 @@ export default function Home() {
             controls
             autoPlay
             loop
-            className="w-full rounded-xl border border-gray-800"
+            className="w-full rounded-xl border border-gray-800 bg-gray-900"
           />
           <button
             onClick={() => {
