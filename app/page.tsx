@@ -9,14 +9,14 @@ export default function Home() {
     "idle" | "uploading" | "processing" | "completed" | "failed"
   >("idle");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [preset] = useState("orbit"); // Removed setPreset since we hardcode orbit for now to avoid unused var
+  const [preset] = useState("orbit");
 
   const handleUpload = async () => {
     if (!file) return;
     setStatus("uploading");
 
     try {
-      // 1. Upload Image (We still use our API to upload to Blob)
+      // 1. Upload Image
       const formData = new FormData();
       formData.append("file", file);
       formData.append("preset", preset);
@@ -32,9 +32,9 @@ export default function Home() {
       setStatus("processing");
 
       // 2. Call Hugging Face via CORS Proxy
-      // Using Stable Video Diffusion XT
+      // Updated URL to use the new Router domain without extra path segments
       const MODEL_URL =
-        "https://router.huggingface.co/hf-inference/models/stabilityai/stable-video-diffusion-img2vid-xt";
+        "https://router.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt";
       const PROXY_URL = "https://corsproxy.io/?";
 
       const hfResponse = await fetch(
