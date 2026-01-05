@@ -34,7 +34,7 @@ export default function Home() {
       // 2. Call Hugging Face via CORS Proxy
       // Using Stable Video Diffusion XT
       const MODEL_URL =
-        "https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt";
+        "https://router.huggingface.co/hf-inference/models/stabilityai/stable-video-diffusion-img2vid-xt";
       const PROXY_URL = "https://corsproxy.io/?";
 
       const hfResponse = await fetch(
