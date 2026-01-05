@@ -31,35 +31,52 @@ export default function Home() {
 
       setStatus("processing");
 
-      // 2. Call Segmind Directly (No Vercel Timeout)
-      // Note: If you get CORS error here, you must use a proxy or server-side Replicate.
-      // Segmind usually supports CORS for direct calls if origin is allowed in settings,
-      // or we just try it.
-
-      // Convert Image URL to Base64? Segmind accepts URL.
-
-      const segmindRes = await fetch(
-        "https://api.segmind.com/v1/svd-img2vid-xt",
-        {
-          method: "POST",
-          headers: {
-            "x-api-key": apiKey,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            image: imageUrl,
-            motion_bucket_id: 127,
-            cond_aug: 0.02,
-          }),
-        }
-      );
+      // 2. Call Segmind (Kling Model)
+      const segmindRes = await fetch("https://api.segmind.com/v1/kling-v1", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: `Cinematic drone shot, ${preset} camera movement, high quality`,
+          input_image: imageUrl,
+          negative_prompt: "blurry, low quality, distortion",
+          cfg_scale: 0.5,
+          aspect_ratio: "16:9",
+        }),
+      });
 
       if (!segmindRes.ok) {
-        console.error(await segmindRes.text());
-        throw new Error("Segmind API Failed");
+        const errText = await segmindRes.text();
+        console.error("Segmind API Error:", errText);
+        throw new Error(`Segmind Failed: ${errText}`);
       }
 
-      const videoBlob = await segmindRes.blob();
+      // Handle response (Binary Video OR JSON URL)
+      const contentType = segmindRes.headers.get("content-type");
+      let videoBlob: Blob;
+
+      if (contentType && contentType.includes("application/json")) {
+        // If JSON, it likely contains a URL or Base64
+        const json = await segmindRes.json();
+        console.log("Segmind JSON:", json);
+
+        if (json.video || json.output) {
+          const vidUrl = json.video || json.output;
+          const vidFetch = await fetch(vidUrl);
+          videoBlob = await vidFetch.blob();
+        } else if (json.status && json.status !== "completed") {
+          throw new Error(
+            "Job started but is async. Polling not implemented in this demo."
+          );
+        } else {
+          throw new Error("Unknown JSON response format");
+        }
+      } else {
+        // It's a raw video file
+        videoBlob = await segmindRes.blob();
+      }
 
       // 3. Save Result
       const videoFile = new File([videoBlob], "video.mp4", {
@@ -77,9 +94,11 @@ export default function Home() {
 
       setVideoUrl(saveData.videoUrl);
       setStatus("completed");
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
       setStatus("failed");
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      alert(`Error: ${msg}`);
     }
   };
 
@@ -89,7 +108,7 @@ export default function Home() {
         AeroScene
       </h1>
       <p className="text-gray-400 mb-8">
-        AI Drone Video Generator (Segmind Free Tier)
+        AI Drone Video Generator (Segmind Kling)
       </p>
 
       {status === "idle" && (
@@ -110,15 +129,27 @@ export default function Home() {
           <div className="flex gap-2">
             <button
               onClick={() => setPreset("orbit")}
-              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
+              className={`flex-1 p-3 rounded-lg border ${
+                preset === "orbit" ? "border-blue-500" : "border-gray-800"
+              } bg-gray-900`}
             >
               Orbit
             </button>
             <button
               onClick={() => setPreset("zoom")}
-              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
+              className={`flex-1 p-3 rounded-lg border ${
+                preset === "zoom" ? "border-blue-500" : "border-gray-800"
+              } bg-gray-900`}
             >
               Zoom
+            </button>
+            <button
+              onClick={() => setPreset("pan")}
+              className={`flex-1 p-3 rounded-lg border ${
+                preset === "pan" ? "border-blue-500" : "border-gray-800"
+              } bg-gray-900`}
+            >
+              Pan
             </button>
           </div>
 
@@ -138,14 +169,17 @@ export default function Home() {
             <div className="absolute inset-0 border-4 border-gray-800 rounded-full"></div>
             <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
           </div>
-          <p className="text-gray-400">Generating... (Wait 20s)</p>
+          <p className="text-gray-400">Generating... (This may take 30-60s)</p>
         </div>
       )}
 
       {status === "failed" && (
         <div className="text-center text-red-500">
-          <p>Generation Failed. (Check Console for CORS/API Error)</p>
-          <button onClick={() => setStatus("idle")} className="underline mt-4">
+          <p>Generation Failed.</p>
+          <button
+            onClick={() => setStatus("idle")}
+            className="underline mt-4 text-white"
+          >
             Try Again
           </button>
         </div>
@@ -164,6 +198,7 @@ export default function Home() {
             onClick={() => {
               setStatus("idle");
               setFile(null);
+              setVideoUrl(null);
             }}
             className="w-full py-3 mt-4 text-gray-400 border border-gray-800 rounded-lg"
           >
