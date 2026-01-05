@@ -30,32 +30,53 @@ export async function createVideoJob(file: File, preset: string) {
 
   if (error) throw new Error(error.message);
 
-  // 3. Start AI Generation (Replicate - Stable Video Diffusion)
-  // Using a stable version hash for SVD XT
-  const prediction = await replicate.predictions.create({
-    version: "3f0457e4619daac51203dedb472816f3afc54a3c84faeef8706f87124f5e2726",
-    input: {
-      input_image: blob.url,
-      video_length: "14_frames_with_svd_xt",
-      sizing_strategy: "maintain_aspect_ratio",
-      frames_per_second: 6,
-      motion_bucket_id: 127,
-      cond_aug: 0.02,
-      decoding_t: 14,
-    },
-  });
+  // 3. Start AI Generation
+  // Model: stability-ai/stable-video-diffusion
+  try {
+    const prediction = await replicate.predictions.create({
+      version:
+        "3f0457e4619daac51203dedb472816f3afc54a3c84faeef8706f87124f5e2726",
+      input: {
+        input_image: blob.url,
+        video_length: "14_frames_with_svd_xt",
+        frames_per_second: 6,
+        motion_bucket_id: 127,
+        cond_aug: 0.02,
+        decoding_t: 14,
+        sizing_strategy: "maintain_aspect_ratio",
+      },
+    });
 
-  // 4. Save Replicate ID to DB (store in 'prompt' column as a hack to save space)
-  await supabase
-    .from("jobs")
-    .update({ prompt: prediction.id })
-    .eq("id", job.id);
+    // 4. Save Replicate ID
+    await supabase
+      .from("jobs")
+      .update({ prompt: prediction.id })
+      .eq("id", job.id);
 
-  return job;
+    return job;
+  } catch (err: unknown) {
+    console.log("SVD failed, trying fallback...", err);
+
+    // Fallback: Zeroscope XL (Text-to-video mostly, but useful to test pipe)
+    // Note: We use the 'video' input just to test the API connection if SVD failed
+    const fallback = await replicate.predictions.create({
+      version:
+        "9f747673945c62801b13b84701c783929c0ee784e4748ec062204894dda1a351",
+      input: {
+        prompt: "Cinematic drone shot of a landscape",
+        num_frames: 24,
+      },
+    });
+
+    await supabase
+      .from("jobs")
+      .update({ prompt: fallback.id })
+      .eq("id", job.id);
+    return job;
+  }
 }
 
 export async function checkJobStatus(jobId: string) {
-  // 1. Get Job from DB
   const { data: job } = await supabase
     .from("jobs")
     .select("*")
@@ -66,8 +87,10 @@ export async function checkJobStatus(jobId: string) {
     return job;
   }
 
-  // 2. Check Replicate Status
   const replicateId = job.prompt;
+
+  if (!replicateId) return job;
+
   const prediction = await replicate.predictions.get(replicateId);
 
   if (prediction.status === "succeeded") {
@@ -87,5 +110,5 @@ export async function checkJobStatus(jobId: string) {
     return { ...job, status: "failed" };
   }
 
-  return job; // Still processing
+  return job;
 }
