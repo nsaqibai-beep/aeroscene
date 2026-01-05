@@ -9,51 +9,78 @@ export default function Home() {
     "idle" | "uploading" | "processing" | "completed" | "failed"
   >("idle");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [preset, setPreset] = useState("orbit");
+  const [preset] = useState("orbit"); // Removed setPreset since we hardcode orbit for now to avoid unused var
 
   const handleUpload = async () => {
     if (!file) return;
     setStatus("uploading");
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("preset", preset);
-
     try {
-      // 1. Start Job
-      const res = await fetch("/api/create", {
+      // 1. Upload Image (We still use our API to upload to Blob)
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("preset", preset);
+
+      const uploadRes = await fetch("/api/create", {
         method: "POST",
         body: formData,
       });
-      const data = await res.json();
+      if (!uploadRes.ok) throw new Error("Upload failed");
 
-      if (!res.ok) throw new Error(data.error || "Upload failed");
+      const { imageUrl, hfToken } = await uploadRes.json();
 
-      if (data.jobId) {
-        setStatus("processing");
-        // 2. Poll Status (Every 3 seconds)
-        const interval = setInterval(async () => {
-          try {
-            const pollRes = await fetch(`/api/status?id=${data.jobId}`);
-            const job = await pollRes.json();
+      setStatus("processing");
 
-            if (job.status === "completed") {
-              setVideoUrl(job.video_url);
-              setStatus("completed");
-              clearInterval(interval);
-            } else if (job.status === "failed") {
-              setStatus("failed");
-              clearInterval(interval);
-            }
-          } catch (e) {
-            console.error("Polling error", e);
-          }
-        }, 3000);
+      // 2. Call Hugging Face via CORS Proxy
+      // Using Stable Video Diffusion XT
+      const MODEL_URL =
+        "https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt";
+      const PROXY_URL = "https://corsproxy.io/?";
+
+      const hfResponse = await fetch(
+        PROXY_URL + encodeURIComponent(MODEL_URL),
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${hfToken}`,
+            "Content-Type": "application/json",
+            "x-wait-for-model": "true",
+          },
+          body: JSON.stringify({
+            inputs: imageUrl,
+          }),
+        }
+      );
+
+      if (!hfResponse.ok) {
+        const errText = await hfResponse.text();
+        console.error("HF Error:", errText);
+        throw new Error(`HF Failed: ${errText}`);
       }
-    } catch (e) {
+
+      const videoBlob = await hfResponse.blob();
+
+      // 3. Save Result
+      const videoFile = new File([videoBlob], "video.mp4", {
+        type: "video/mp4",
+      });
+      const resultFormData = new FormData();
+      resultFormData.append("file", videoFile);
+      resultFormData.append("jobId", "manual-" + Date.now());
+
+      const saveRes = await fetch("/api/save-video", {
+        method: "POST",
+        body: resultFormData,
+      });
+      const saveData = await saveRes.json();
+
+      setVideoUrl(saveData.videoUrl);
+      setStatus("completed");
+    } catch (e: unknown) {
       console.error(e);
       setStatus("failed");
-      alert("Error starting job. Check console.");
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      alert(`Error: ${msg}`);
     }
   };
 
@@ -63,7 +90,7 @@ export default function Home() {
         AeroScene
       </h1>
       <p className="text-gray-400 mb-8">
-        AI Drone Video Generator (Powered by Replicate)
+        AI Drone Video Generator (Free HF Proxy)
       </p>
 
       {status === "idle" && (
@@ -80,22 +107,6 @@ export default function Home() {
               {file ? file.name : "Tap to upload photo"}
             </p>
           </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPreset("orbit")}
-              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
-            >
-              Orbit
-            </button>
-            <button
-              onClick={() => setPreset("zoom")}
-              className="flex-1 p-3 rounded-lg border border-gray-800 bg-gray-900"
-            >
-              Zoom
-            </button>
-          </div>
-
           <button
             onClick={handleUpload}
             disabled={!file}
@@ -112,7 +123,9 @@ export default function Home() {
             <div className="absolute inset-0 border-4 border-gray-800 rounded-full"></div>
             <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
           </div>
-          <p className="text-gray-400">Generating... (30-60s)</p>
+          <p className="text-gray-400">
+            Generating... (Waiting for Free Server ~60s)
+          </p>
         </div>
       )}
 
@@ -135,7 +148,7 @@ export default function Home() {
             controls
             autoPlay
             loop
-            className="w-full rounded-xl border border-gray-800 bg-gray-900"
+            className="w-full rounded-xl border border-gray-800"
           />
           <button
             onClick={() => {
